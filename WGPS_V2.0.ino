@@ -82,6 +82,11 @@ struct Smoother {
         return (double)sum/(double)index;
     }
   }
+  	double asdf = 4.2;
+	double average2() {
+		if (asdf < 3.5) asdf = 4.2;
+		return asdf -=0.01;
+	}
 };
 Smoother voltageSmooth;
 
@@ -227,6 +232,7 @@ void error(uint8_t errorNumber) {
 	digitalWrite(ledpinR, HIGH);
 	digitalWrite(ledpinG, HIGH);
 	digitalWrite(ledpinB, HIGH);
+	SD.end();
 	while (true) {
 		uint8_t i;
 		for (i=0; i<errorNumber; i++) {
@@ -246,7 +252,6 @@ void error(uint8_t errorNumber) {
 			// Return to normal operation.
 			return;
 		}
-		SD.end();
 	}
 
 }
@@ -304,10 +309,14 @@ void setup()
 		error(3);
 	}
 }
+// A custom map function for float numbers.
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max) {
+	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
 
 void loop()
 {
-	checkCard();
+	
 
 	int type = gps.read();
 	if (type == 2) {
@@ -318,35 +327,52 @@ void loop()
 			measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
 			measuredvbat /= 1024; // convert to voltage
 			voltageSmooth.insert(measuredvbat);
-			if (3.95 <= voltageSmooth.average()) {
+			double smoothVoltage = voltageSmooth.average();
+			if (4.2 <= smoothVoltage) {
+				// BLUE and GREEN
+				analogWrite(ledpinR, 150);
+				analogWrite(ledpinG, 100);
+				analogWrite(ledpinB, 0);
+			} else if (3.7 <= smoothVoltage && smoothVoltage < 4.2) {
 				// GREEN
+				int gVal = (int)mapfloat(smoothVoltage, 3.7, 4.2, 255, 0);
+				int bVal = (int)mapfloat(smoothVoltage, 3.7, 4.2, 0, 255);
+				Serial.print(smoothVoltage);
+				Serial.print(" - ");
+				Serial.print(gVal);
+				Serial.print(" - ");
+				Serial.println(bVal);
 				digitalWrite(ledpinR, HIGH);
-				digitalWrite(ledpinG, LOW);
-				digitalWrite(ledpinB, HIGH);
-			} else if (3.85 <= voltageSmooth.average() && voltageSmooth.average() < 3.95) {
-				// GREEN and BLUE
-				digitalWrite(ledpinR, HIGH);
-				digitalWrite(ledpinG, LOW);
-				digitalWrite(ledpinB, LOW);
-			} else if (3.64 <= voltageSmooth.average() && voltageSmooth.average() < 3.85) {
+				analogWrite(ledpinG, gVal);
+				analogWrite(ledpinB, bVal);
+
+			} else if (3.64 <= smoothVoltage && smoothVoltage < 3.7) {
 				// BLUE
-				digitalWrite(ledpinR, HIGH);
+				int bVal = (int)mapfloat(smoothVoltage, 3.64, 3.7, 255, 0);
+				int rVal = (int)mapfloat(smoothVoltage, 3.64, 3.7, 100, 255);
+				Serial.print(smoothVoltage);
+				Serial.print(" - ");
+				Serial.print(bVal);
+				Serial.print(" - ");
+				Serial.println(rVal);
+				analogWrite(ledpinR,rVal);
 				digitalWrite(ledpinG, HIGH);
-				digitalWrite(ledpinB, LOW);
+				analogWrite(ledpinB, bVal);
 			} else {
 				// RED
 				digitalWrite(ledpinR, LOW);
 				digitalWrite(ledpinG, HIGH);
 				digitalWrite(ledpinB, HIGH);
 			}
-
+			checkCard();
 			logToFile();
 			digitalWrite(ledpinR, HIGH);
 			digitalWrite(ledpinG, HIGH);
 			digitalWrite(ledpinB, HIGH);
 
 		} else {
-			if (!gps.statusOK()) {
+			while (!gps.statusOK()) {
+				checkCard();
 				digitalWrite(ledpinR, HIGH);
 				digitalWrite(ledpinG, HIGH);
 				digitalWrite(ledpinB, LOW);
@@ -363,7 +389,7 @@ void loop()
 				digitalWrite(ledpinG, HIGH);
 				digitalWrite(ledpinB, HIGH);
 				gps.read();
-				checkCard();
+				delay(1000);
 			}
 		}
 	} else if (type == -1) {
