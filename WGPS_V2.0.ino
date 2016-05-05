@@ -234,6 +234,7 @@ void error(uint8_t errorNumber) {
 	digitalWrite(ledpinB, HIGH);
 	SD.end();
 	while (true) {
+    voltageSmooth.insert(batteryRead());
 		uint8_t i;
 		for (i=0; i<errorNumber; i++) {
 			digitalWrite(ledpinR, LOW);
@@ -246,7 +247,7 @@ void error(uint8_t errorNumber) {
 		}
 		// Check if a card has been inserted.
 		if (SD.begin(chipSelect)) {
-			// Open the same file again.
+			// Open a new file again.
 			dataFile = openNewFile();
 			hadCard = true;
 			// Return to normal operation.
@@ -313,20 +314,20 @@ void setup()
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max) {
 	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
+float batteryRead() {
+  float measuredvbat = analogRead(A7);
+  measuredvbat *= 2;    // we divided by 2, so multiply back
+  measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
+  measuredvbat /= 1024; // convert to voltage
+  return measuredvbat;
+}
 
 void loop()
 {
-	
-
 	int type = gps.read();
 	if (type == 2) {
 		if (gps.statusOK()) {
-
-			float measuredvbat = analogRead(A7);
-			measuredvbat *= 2;    // we divided by 2, so multiply back
-			measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
-			measuredvbat /= 1024; // convert to voltage
-			voltageSmooth.insert(measuredvbat);
+			voltageSmooth.insert(batteryRead());
 			double smoothVoltage = voltageSmooth.average();
 			if (4.2 <= smoothVoltage) {
 				// BLUE and GREEN
