@@ -1,13 +1,13 @@
 #include <SPI.h>
 #include <SD.h>
+#include "MAX17043.h"
+#include "Wire.h"
 
 #define ledpinR 11
 #define ledpinG 12
 #define ledpinB 10
 
 #define SMOOTH_SIZE 120
-
-
 
 const unsigned char UBX_HEADER[]      = { 0xB5, 0x62 };
 
@@ -19,6 +19,7 @@ int fileNumber = 0;
 bool hadCard = false;
 char currFile[15];
 
+MAX17043 batteryMonitor;
 File dataFile;
 File openNewFile() {
   char filename[15];
@@ -210,7 +211,16 @@ void logToFile() {
 	dataFile.print(":");
 	if (gps.pvt.sec < 10) dataFile.print("0");
 	dataFile.print(gps.pvt.sec);
-	dataFile.print(".000Z;");
+	double nano = gps.pvt.nano;
+  dataFile.print(".");
+  if (round(nano/1000000.0) < 0){
+    dataFile.print("000");
+  } else {
+      if (round(nano/1000000.0) < 10) dataFile.print("0");
+      if (round(nano/1000000.0) < 100) dataFile.print("0");
+      dataFile.print(round(nano/1000000.0));
+  }
+  dataFile.print("Z;");
 	dataFile.print(latitude, 7);
 	dataFile.print(";");
 	dataFile.print(longitude, 7);
@@ -219,7 +229,13 @@ void logToFile() {
 	dataFile.print(";");
 	dataFile.print((gps.pvt.hAcc/1000.0), 3);
 	dataFile.print(";");
-	dataFile.print(voltageSmooth.average(), 3);
+	dataFile.print(batteryMonitor.getVCell(), 3);
+  dataFile.print(";");
+  dataFile.print(voltageSmooth.average(),3);
+  dataFile.print(";");
+  dataFile.print(batteryMonitor.getCompensateValue(), HEX);
+  dataFile.print(";");
+  dataFile.print(batteryMonitor.getSoC(), 2);
 
 	if (dataFile.println() == 0) error(4);
 
@@ -261,6 +277,7 @@ void checkCard() {
 	bool cardPresent = SD.exists(currFile);
 	if (!cardPresent && hadCard) {
 		Serial.println("Card removed");
+		dataFile.flush();
 		SD.end();
 		hadCard = false;
 		error(4);
@@ -277,6 +294,7 @@ void checkCard() {
 
 void setup()
 {
+  Wire.begin();
 	Serial.begin(115200);
 	Serial.println("Welcome to my Ublox GPS Parser!");
 	Serial1.begin(9600);
@@ -322,73 +340,80 @@ float batteryRead() {
   return measuredvbat;
 }
 
+void noSignalBlink() {
+  digitalWrite(ledpinR, HIGH);
+  digitalWrite(ledpinG, HIGH);
+  digitalWrite(ledpinB, LOW);
+  delay(100);
+  digitalWrite(ledpinR, HIGH);
+  digitalWrite(ledpinG, HIGH);
+  digitalWrite(ledpinB, HIGH);
+  delay(200);
+  digitalWrite(ledpinR, HIGH);
+  digitalWrite(ledpinG, HIGH);
+  digitalWrite(ledpinB, LOW);
+  delay(100);
+  digitalWrite(ledpinR, HIGH);
+  digitalWrite(ledpinG, HIGH);
+  digitalWrite(ledpinB, HIGH);
+}
+
+void turnAllLedsOff() {
+  digitalWrite(ledpinR, HIGH);
+  digitalWrite(ledpinG, HIGH);
+  digitalWrite(ledpinB, HIGH);
+}
+
+void batteryStatusColor(double value){
+    if (99 <= value) {
+    // WHITE
+    analogWrite(ledpinR, 150);
+    analogWrite(ledpinG, 100);
+    analogWrite(ledpinB, 0);
+  } else if (5 <= value && value < 99) {
+    // GREEN -> BLUE
+    int gVal = (int)mapfloat(value, 5, 100, 255, 0);
+    int bVal = (int)mapfloat(value, 5, 100, 0, 255);
+    digitalWrite(ledpinR, HIGH);
+    analogWrite(ledpinG, gVal);
+    analogWrite(ledpinB, bVal);
+  
+  } else if (1.5 <= value && value < 5) {
+    // BLUE -> RED
+    int bVal = (int)mapfloat(value, 1.5, 5, 255, 0);
+    int rVal = (int)mapfloat(value, 1.5, 5, 100, 255);
+    analogWrite(ledpinR,rVal);
+    digitalWrite(ledpinG, HIGH);
+    analogWrite(ledpinB, bVal);
+  } else {
+    // WHITE
+    analogWrite(ledpinR, 150);
+    analogWrite(ledpinG, 100);
+    analogWrite(ledpinB, 0);
+  }
+}
+double oldVoltage = -1;
 void loop()
 {
 	int type = gps.read();
 	if (type == 2) {
 		if (gps.statusOK()) {
 			voltageSmooth.insert(batteryRead());
-			double smoothVoltage = voltageSmooth.average();
-			if (4.2 <= smoothVoltage) {
-				// BLUE and GREEN
-				analogWrite(ledpinR, 150);
-				analogWrite(ledpinG, 100);
-				analogWrite(ledpinB, 0);
-			} else if (3.7 <= smoothVoltage && smoothVoltage < 4.2) {
-				// GREEN
-				int gVal = (int)mapfloat(smoothVoltage, 3.7, 4.2, 255, 0);
-				int bVal = (int)mapfloat(smoothVoltage, 3.7, 4.2, 0, 255);
-				Serial.print(smoothVoltage);
-				Serial.print(" - ");
-				Serial.print(gVal);
-				Serial.print(" - ");
-				Serial.println(bVal);
-				digitalWrite(ledpinR, HIGH);
-				analogWrite(ledpinG, gVal);
-				analogWrite(ledpinB, bVal);
-
-			} else if (3.64 <= smoothVoltage && smoothVoltage < 3.7) {
-				// BLUE
-				int bVal = (int)mapfloat(smoothVoltage, 3.64, 3.7, 255, 0);
-				int rVal = (int)mapfloat(smoothVoltage, 3.64, 3.7, 100, 255);
-				Serial.print(smoothVoltage);
-				Serial.print(" - ");
-				Serial.print(bVal);
-				Serial.print(" - ");
-				Serial.println(rVal);
-				analogWrite(ledpinR,rVal);
-				digitalWrite(ledpinG, HIGH);
-				analogWrite(ledpinB, bVal);
-			} else {
-				// RED
-				digitalWrite(ledpinR, LOW);
-				digitalWrite(ledpinG, HIGH);
-				digitalWrite(ledpinB, HIGH);
-			}
+     double smoothVoltage = batteryMonitor.getSoC();
+     if (oldVoltage != smoothVoltage) {
+       Serial.print(smoothVoltage);Serial.println("%");
+       oldVoltage = smoothVoltage;
+     }
+     
+      batteryStatusColor(smoothVoltage);
 			checkCard();
 			logToFile();
-			digitalWrite(ledpinR, HIGH);
-			digitalWrite(ledpinG, HIGH);
-			digitalWrite(ledpinB, HIGH);
+      turnAllLedsOff();
 
 		} else {
 			while (!gps.statusOK()) {
 				checkCard();
-				digitalWrite(ledpinR, HIGH);
-				digitalWrite(ledpinG, HIGH);
-				digitalWrite(ledpinB, LOW);
-				delay(100);
-				digitalWrite(ledpinR, HIGH);
-				digitalWrite(ledpinG, HIGH);
-				digitalWrite(ledpinB, HIGH);
-				delay(200);
-				digitalWrite(ledpinR, HIGH);
-				digitalWrite(ledpinG, HIGH);
-				digitalWrite(ledpinB, LOW);
-				delay(100);
-				digitalWrite(ledpinR, HIGH);
-				digitalWrite(ledpinG, HIGH);
-				digitalWrite(ledpinB, HIGH);
+        noSignalBlink();
 				gps.read();
 				delay(1000);
 			}
